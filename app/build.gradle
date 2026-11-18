@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.qoder.gateway'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.qoder.gateway'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    // 关键：把 8.7MB 的 ELF 二进制按原样打进 assets，不压缩，
+    // 这样运行时可以直接从 assets 读出并 exec。
+    packagingOptions {
+        noCompress 'qoder2api'
+    }
+}

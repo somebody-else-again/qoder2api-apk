@@ -1,0 +1,8 @@
+{
+  "port": 8963,
+  "auto_start": true,
+  "log_level": "info",
+  "quota_refresh_interval": 300,
+  "auto_checkin": false,
+  "auto_refresh_token": false
+}

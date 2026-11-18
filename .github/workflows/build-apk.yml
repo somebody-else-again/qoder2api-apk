@@ -1,0 +1,49 @@
+name: Build qoder2api APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make Gradle wrapper executable
+        working-directory: apk-build
+        run: chmod +x gradlew 2>/dev/null || true
+
+      - name: Generate Gradle wrapper
+        working-directory: apk-build
+        run: |
+          # 若仓库里没有 gradlew，用临时容器生成一次
+          if [ ! -f gradlew ]; then
+            docker run --rm -v "$PWD":/w -w /w gradle:8.7-jdk17 gradle wrapper
+          fi
+
+      - name: Verify embedded binary
+        working-directory: apk-build
+        run: file app/src/main/assets/qoder2api
+
+      - name: Build debug APK
+        working-directory: apk-build
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: qoder2api-apk
+          path: apk-build/app/build/outputs/apk/debug/*.apk
+          retention-days: 30

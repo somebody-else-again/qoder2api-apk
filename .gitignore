@@ -1,0 +1,5 @@
+# 仅忽略构建产物；二进制与干净配置必须提交，云端构建依赖它们。
+app/build/
+.gradle/
+local.properties
+*.apk
