@@ -6,9 +6,13 @@
 
 ## 原理
 
-- Android 基于 Linux，静态 Go 二进制（CGO_ENABLED=0、AArch64、PIE）可在 App 私有目录直接 exec。
-- App 启动时只解压 `qoder2api` 二进制与干净的 `settings.json` 到 `getFilesDir()/qoder2api`，
-  `chmod 0700` 后拉起本地网关，日志回显到界面。
+- Android 基于 Linux，静态 Go 二进制（CGO_ENABLED=0、AArch64、PIE）可作为 native 库被打包执行。
+- **为什么放 `jniLibs` 而不是 `assets`**：Android 10+ 对 App 私有数据目录（`getFilesDir()`）施加了
+  SELinux `noexec`，从那里 `exec` 二进制会报 `error=13, Permission denied`（chmod 也没用）。
+  而 `jniLibs/arm64-v8a/*.so` 会被系统在安装时解压到 `nativeLibraryDir`，该目录**允许 exec**。
+  因此二进制以 `libqoder2api.so` 的名字放入 `jniLibs/arm64-v8a/`，运行时直接从 `nativeLibraryDir` 执行。
+- App 启动时把干净的 `settings.json` 解压到 `getFilesDir()/qoder2api`（可写数据区），
+  从 `nativeLibraryDir` 拉起本地网关，日志回显到界面。
 - 用户输入 PAT 后，App 通过本机管理 API 交给 Go 服务：
   - `POST /api/auth/login`（用 App 内置控制台密码换 session）
   - `POST /api/accounts/add`（提交 `{"pat","region"}`）
@@ -22,8 +26,8 @@
 apk-build/
 ├── app/src/main/
 │   ├── java/com/qoder/gateway/MainActivity.java   # 壳：解压 + 启动 + PAT 输入 + 日志
+│   ├── jniLibs/arm64-v8a/libqoder2api.so          # arm64 二进制（伪装成 .so，可 exec）
 │   └── assets/
-│       ├── qoder2api                              # arm64 二进制（8.7MB，不压缩）
 │       └── data/settings.json                     # 干净配置（无密码/无盐/无账号）
 ├── .github/workflows/build-apk.yml                # 云端构建
 └── build.gradle / settings.gradle / app/build.gradle / gradle-wrapper.properties

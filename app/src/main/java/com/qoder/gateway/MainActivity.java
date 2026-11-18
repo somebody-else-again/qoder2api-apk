@@ -136,26 +136,38 @@ public class MainActivity extends Activity {
     }
 
     private void deployAndStart() {
-        File base = new File(getFilesDir(), "qoder2api");
+        File dataRoot = new File(getFilesDir(), "qoder2api");
         try {
             log("== qoder2api for Android ==");
             log("架构: " + System.getProperty("os.arch"));
 
-            File bin = new File(base, "qoder2api");
-            copyAssetIfAbsent("qoder2api", bin, true);
-            copyAssetIfAbsent("data/settings.json", new File(base, "data/settings.json"), false);
-            new File(base, "accounts").mkdirs();
-            new File(base, "secrets").mkdirs();
-            new File(base, "logs").mkdirs();
+            // 关键：二进制必须从 nativeLibraryDir 执行。
+            // Android 10+ 对 getFilesDir() 施加 SELinux noexec，直接 exec 会 error=13；
+            // jniLibs 里的 .so 会被系统解压到 nativeLibraryDir，该目录允许 exec。
+            File bin = new File(getApplicationInfo().nativeLibraryDir, "libqoder2api.so");
+            if (!bin.exists()) {
+                log("未找到内置二进制: " + bin.getAbsolutePath());
+                return;
+            }
+            try {
+                Os.chmod(bin.getAbsolutePath(), 0700);
+            } catch (Exception ignored) {
+                // nativeLibraryDir 通常已可执行；失败也不阻断
+            }
+
+            copyAssetIfAbsent("data/settings.json", new File(dataRoot, "settings.json"), false);
+            new File(dataRoot, "accounts").mkdirs();
+            new File(dataRoot, "secrets").mkdirs();
+            new File(dataRoot, "logs").mkdirs();
 
             if (!isRunning(bin)) {
                 log("正在启动本地网关...");
                 ProcessBuilder pb = new ProcessBuilder(
                         bin.getAbsolutePath(),
-                        "--data-dir=" + base.getAbsolutePath(),
+                        "--data-dir=" + dataRoot.getAbsolutePath(),
                         "--instance=cn");
-                pb.directory(base);
-                pb.environment().put("QODER2API_HOME", base.getAbsolutePath());
+                pb.directory(dataRoot);
+                pb.environment().put("QODER2API_HOME", dataRoot.getAbsolutePath());
                 pb.environment().put("QODER2API_CONSOLE_PASSWORD", CONSOLE_PASSWORD);
                 pb.redirectErrorStream(true);
                 final Process p = pb.start();
