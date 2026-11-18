@@ -250,19 +250,35 @@ public class MainActivity extends Activity {
             c.setRequestProperty("Content-Type", "application/json");
             byte[] body = ("{\"password\":" + JSONObject.quote(CONSOLE_PASSWORD) + "}")
                     .getBytes(StandardCharsets.UTF_8);
-            c.getOutputStream().write(body);
+            java.io.OutputStream os = c.getOutputStream();
+            os.write(body);
+            os.flush();
+            os.close();
             int code = c.getResponseCode();
-            String cookie = c.getHeaderField("Set-Cookie");
-            if (code != 200 || cookie == null) return null;
-            for (String part : cookie.split(";")) {
-                String kv = part.trim();
-                if (kv.startsWith("qoder2api_session_")) {
-                    int eq = kv.indexOf('=');
-                    if (eq > 0) return kv.substring(eq + 1);
+            if (code != 200) {
+                log("登录 HTTP " + code + "，请检查服务状态。");
+                return null;
+            }
+            // 服务端会设置两个同名 Set-Cookie：真正的 qoder2api_session_<port>=<token>
+            // 以及清空用的 legacy qoder2api_session=。Android/OkHttp 的 getHeaderField()
+            // 只返回其中一个（常是 legacy），必须遍历全部同名头才能取到真正的 session token。
+            for (java.util.Map.Entry<String, java.util.List<String>> h
+                    : c.getHeaderFields().entrySet()) {
+                if (h.getKey() == null || !"Set-Cookie".equalsIgnoreCase(h.getKey())) continue;
+                for (String cookie : h.getValue()) {
+                    for (String part : cookie.split(";")) {
+                        String kv = part.trim();
+                        if (kv.startsWith("qoder2api_session_")) {
+                            int eq = kv.indexOf('=');
+                            if (eq > 0) return kv.substring(eq + 1);
+                        }
+                    }
                 }
             }
+            log("登录成功但未解析到 session cookie。");
             return null;
         } catch (Exception e) {
+            log("登录异常: " + e);
             return null;
         } finally {
             if (c != null) c.disconnect();
@@ -279,7 +295,10 @@ public class MainActivity extends Activity {
             c.setReadTimeout(20000);
             c.setRequestProperty("Content-Type", "application/json");
             if (token != null) c.setRequestProperty("Authorization", "Bearer " + token);
-            c.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
+            java.io.OutputStream os = c.getOutputStream();
+            os.write(body.getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            os.close();
             int code = c.getResponseCode();
             InputStream in = (code >= 200 && code < 300) ? c.getInputStream() : c.getErrorStream();
             return readAll(in);

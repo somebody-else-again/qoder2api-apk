@@ -4,5 +4,6 @@
   "log_level": "info",
   "quota_refresh_interval": 300,
   "auto_checkin": false,
-  "auto_refresh_token": false
+  "auto_refresh_token": false,
+  "console_password": "qoder2api-apk-console"
 }
