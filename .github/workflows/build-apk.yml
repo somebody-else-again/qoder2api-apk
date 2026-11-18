@@ -18,32 +18,32 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Make Gradle wrapper executable
-        working-directory: apk-build
-        run: chmod +x gradlew 2>/dev/null || true
-
-      - name: Generate Gradle wrapper
-        working-directory: apk-build
+      - name: Configure Android SDK
         run: |
-          # 若仓库里没有 gradlew，用临时容器生成一次
-          if [ ! -f gradlew ]; then
-            docker run --rm -v "$PWD":/w -w /w gradle:8.7-jdk17 gradle wrapper
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          SDKMGR=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)
+          if [ -n "$SDKMGR" ]; then
+            yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+            "$SDKMGR" "platforms;android-34" "build-tools;34.0.0" 2>&1 | tail -5 || true
           fi
 
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
       - name: Verify embedded binary
-        working-directory: apk-build
-        run: file app/src/main/assets/qoder2api
+        run: |
+          file app/src/main/assets/qoder2api
+          test -s app/src/main/assets/qoder2api
 
       - name: Build debug APK
-        working-directory: apk-build
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: qoder2api-apk
-          path: apk-build/app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
