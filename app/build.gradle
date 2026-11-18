@@ -20,9 +20,6 @@ android {
         }
     }
 
-    // 关键：把 8.7MB 的 ELF 二进制按原样打进 assets，不压缩，
-    // 这样运行时可以直接从 assets 读出并 exec。
-    packagingOptions {
-        noCompress 'qoder2api'
-    }
+    // assets 里的 ELF 通过 getAssets().open() 读取：AssetManager 会透明解压，
+    // 无需 noCompress（AGP 8.x 已移除该 DSL）。
 }
