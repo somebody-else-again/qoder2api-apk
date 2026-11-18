@@ -312,7 +312,13 @@ public class MainActivity extends Activity {
             int n;
             while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
         }
-        if (executable) Os.chmod(dest.getAbsolutePath(), 0700);
+        if (executable) {
+            try {
+                Os.chmod(dest.getAbsolutePath(), 0700);
+            } catch (Exception e) {
+                // chmod 失败时进程启动一般也会失败并写进日志，这里不阻断部署流程
+            }
+        }
     }
 
     private boolean isRunning(File bin) {
