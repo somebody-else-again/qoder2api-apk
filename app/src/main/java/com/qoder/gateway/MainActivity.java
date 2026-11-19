@@ -259,9 +259,16 @@ public class MainActivity extends Activity {
                 log("登录 HTTP " + code + "，请检查服务状态。");
                 return null;
             }
-            // 服务端会设置两个同名 Set-Cookie：真正的 qoder2api_session_<port>=<token>
-            // 以及清空用的 legacy qoder2api_session=。Android/OkHttp 的 getHeaderField()
-            // 只返回其中一个（常是 legacy），必须遍历全部同名头才能取到真正的 session token。
+            // 首选：服务端已在 JSON body 直接返回 session_token（新版网关），
+            // 绕开 Android/OkHttp 对 Set-Cookie 多值头的解析坑。
+            String resp = readAll(c.getInputStream());
+            try {
+                JSONObject jo = new JSONObject(resp);
+                String tok = jo.optString("session_token", null);
+                if (tok != null && !tok.isEmpty()) return tok;
+            } catch (Exception ignored) {
+            }
+            // 回退：老网关只在 Set-Cookie 里给 token，遍历全部同名头。
             for (java.util.Map.Entry<String, java.util.List<String>> h
                     : c.getHeaderFields().entrySet()) {
                 if (h.getKey() == null || !"Set-Cookie".equalsIgnoreCase(h.getKey())) continue;
@@ -275,7 +282,7 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            log("登录成功但未解析到 session cookie。");
+            log("登录响应未包含 session token: " + resp);
             return null;
         } catch (Exception e) {
             log("登录异常: " + e);
