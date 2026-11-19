@@ -40,6 +40,8 @@ public class MainActivity extends Activity {
 
     // App 自用的控制台密码：通过环境变量注入服务，仅用于本机管理 API 登录。
     // 用户无需知道它；它不保护数据（数据都在 App 私有目录），只是走通服务自带的鉴权。
+    // Apk 版本横幅：日志第一行可见，用于确认用户确实装了本版本。
+    private static final String APK_VERSION = "v3-local-apply-20261119";
     private static final String CONSOLE_PASSWORD = "qoder2api-apk-console";
     private static final String HOST = "http://127.0.0.1:";
     private static final int WEB_PORT = 3588;
@@ -139,6 +141,7 @@ public class MainActivity extends Activity {
         File dataRoot = new File(getFilesDir(), "qoder2api");
         try {
             log("== qoder2api for Android ==");
+            log("APK 版本: " + APK_VERSION);
             log("架构: " + System.getProperty("os.arch"));
 
             // 关键：二进制必须从 nativeLibraryDir 执行。
@@ -160,8 +163,14 @@ public class MainActivity extends Activity {
             new File(dataRoot, "secrets").mkdirs();
             new File(dataRoot, "logs").mkdirs();
 
-            if (!isRunning(bin)) {
-                log("正在启动本地网关...");
+            // 关键：确认当前在跑的网关确是本版本。若残留旧进程（旧 so 没有
+            // /api/local/version 端点），必须先杀掉再启动，否则会出现
+            // "换了 APK 但跑的还是旧二进制 / 旧登录逻辑" 的假象。
+            String runningVer = httpGetBody(HOST + WEB_PORT + "/api/local/version");
+            boolean sameVersion = runningVer != null && runningVer.contains(APK_VERSION);
+            if (!sameVersion) {
+                killStale(bin);
+                log("正在启动本地网关（" + APK_VERSION + "）...");
                 ProcessBuilder pb = new ProcessBuilder(
                         bin.getAbsolutePath(),
                         "--data-dir=" + dataRoot.getAbsolutePath(),
@@ -211,29 +220,37 @@ public class MainActivity extends Activity {
             return;
         }
         try {
-            log("登录控制台...");
-            String token = login();
-            if (token == null) {
-                log("登录失败：请重启 App 重试。");
-                return;
-            }
             log("提交 PAT（region=" + region + "）...");
-            String body = "{\"pat\":" + JSONObject.quote(pat)
+            // 新版网关：一步式本机端点，密码 + PAT + Region 一次提交，
+            // 服务端直接校验并落盘，完全绕开 session/cookie 登录链路。
+            String body = "{\"password\":" + JSONObject.quote(CONSOLE_PASSWORD)
+                    + ",\"pat\":" + JSONObject.quote(pat)
                     + ",\"region\":" + JSONObject.quote(region) + "}";
-            String resp = postJson(HOST + WEB_PORT + "/api/accounts/add", body, token);
-            if (resp == null) {
-                log("提交失败：请检查 PAT 是否正确、服务是否仍在运行。");
-                return;
+            String resp = postJson(HOST + WEB_PORT + "/api/local/apply", body, null);
+            log("本机端点响应: " + (resp == null ? "<无响应>" : resp));
+            if (resp == null || !resp.contains("\"id\"")) {
+                // 回退：旧网关没有本机端点，走 session 登录 + /api/accounts/add
+                log("本机端点不可用，尝试兼容旧版登录链路...");
+                String token = login();
+                if (token == null) {
+                    log("登录失败：请重启 App 重试。");
+                    return;
+                }
+                String body2 = "{\"pat\":" + JSONObject.quote(pat)
+                        + ",\"region\":" + JSONObject.quote(region) + "}";
+                resp = postJson(HOST + WEB_PORT + "/api/accounts/add", body2, token);
+                log("兼容链路响应: " + (resp == null ? "<无响应>" : resp));
+                if (resp == null || !resp.contains("\"id\"")) {
+                    log("应用失败：请检查 PAT 是否正确、服务是否仍在运行。");
+                    return;
+                }
             }
-            log("结果: " + resp);
-            if (resp.contains("\"id\"")) {
-                log("✓ 添加成功！dsh-go 现在可用：");
-                log("  Base URL: http://127.0.0.1:8963/v1");
-                log("  API Key : qccg");
-                log("  Model   : auto");
-                log("PAT 已存入 App 私有目录，下次打开自动加载，无需重输。");
-                patInput.setText("");
-            }
+            log("✓ 添加成功！dsh-go 现在可用：");
+            log("  Base URL: http://127.0.0.1:8963/v1");
+            log("  API Key : qccg");
+            log("  Model   : auto");
+            log("PAT 已存入 App 私有目录，下次打开自动加载，无需重输。");
+            patInput.setText("");
         } catch (Exception e) {
             log("应用失败: " + e);
         }
@@ -359,15 +376,42 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean isRunning(File bin) {
+    // GET 并返回响应体（用于探测 /api/local/version）
+    private String httpGetBody(String url) {
+        HttpURLConnection c = null;
         try {
-            Process p = new ProcessBuilder("pidof", bin.getName()).start();
-            byte[] out = new byte[256];
-            int n = p.getInputStream().read(out);
-            p.waitFor();
-            return n > 0;
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setRequestMethod("GET");
+            c.setConnectTimeout(2000);
+            c.setReadTimeout(2000);
+            if (c.getResponseCode() != 200) return null;
+            return readAll(c.getInputStream());
         } catch (Exception e) {
-            return false;
+            return null;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    // 杀掉可能残留的旧版网关进程。native 子进程独立于 Activity 生命周期，
+    // 重装 APK 或重启 App 并不会自动结束它；若检测到版本不匹配必须先杀干净。
+    private void killStale(File bin) {
+        String name = bin.getName();
+        try {
+            Process p = new ProcessBuilder("pidof", name).start();
+            String out = readAll(p.getInputStream()).trim();
+            p.waitFor();
+            if (out.isEmpty()) return;
+            log("检测到残留网关进程 " + out + "，正在停止...");
+            for (String pid : out.split("\\s+")) {
+                if (pid.isEmpty()) continue;
+                android.os.Process.killProcess(Integer.parseInt(pid));
+            }
+            // 给旧进程一点退出时间，避免端口未释放
+            Thread.sleep(600);
+            log("残留进程已清理。");
+        } catch (Exception e) {
+            log("清理残留进程: " + e);
         }
     }
 }
